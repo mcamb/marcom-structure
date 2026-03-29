@@ -1,0 +1,8 @@
+.env
+.env.*
+mongodb/
+**/node_modules/
+npm-debug.log*
+docker-compose.yml.bak*
+NotifyInstallFinished*
+*.secret
