@@ -24,6 +24,22 @@ function groupBlocksByType(blocks) {
   return grouped;
 }
 
+/** Eine Zeile pro Block: "typ: wert" (Doppelpunkt nur beim ersten Vorkommen). */
+function parseBlocksText(text) {
+  if (!text || typeof text !== 'string') return [];
+  const out = [];
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const idx = trimmed.indexOf(':');
+    if (idx <= 0) continue;
+    const type = trimmed.slice(0, idx).trim();
+    const value = trimmed.slice(idx + 1).trim();
+    if (type && value) out.push({ type, value });
+  }
+  return out;
+}
+
 let client;
 
 async function getDb() {
@@ -227,6 +243,35 @@ app.get('/c/:id', async (req, res) => {
   }
 });
 
+app.get('/neu', (req, res) => {
+  const html = `<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Neue Kampagne</title><style>body{font-family:system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem;color:#111}a{color:#06c}label{display:block;margin-top:0.75rem;font-weight:600}input,textarea{width:100%;max-width:100%;box-sizing:border-box;margin-top:0.25rem;padding:0.4rem}textarea{min-height:9rem;font-family:ui-monospace,monospace;font-size:0.9rem}button{font:inherit;cursor:pointer;margin-top:1rem;padding:0.45rem 0.75rem}.hint{font-size:0.85rem;color:#444;margin-top:0.25rem}</style></head><body><p><a href="/">← Zur Übersicht</a></p><h1 style="font-size:1.35rem">Neue Kampagne</h1><form method="post" action="/neu"><label for="client">Kunde</label><input id="client" name="client" required placeholder="z. B. BMW" /><label for="name">Kampagnenname</label><input id="name" name="name" required placeholder="z. B. Sommer 2026" /><label for="blocks">Blocks <span style="font-weight:normal">(optional)</span></label><p class="hint">Eine Zeile pro Baustein: <code>typ: wert</code></p><textarea id="blocks" name="blocks" placeholder="market: DE&#10;channel: YouTube&#10;format: 16:9 Video"></textarea><div><button type="submit">Kampagne anlegen</button></div></form></body></html>`;
+  res.type('html').send(html);
+});
+
+app.post('/neu', express.urlencoded({ extended: true, limit: '512kb' }), async (req, res) => {
+  try {
+    const kunde = (req.body && req.body.client && String(req.body.client).trim()) || '';
+    const name = (req.body && req.body.name && String(req.body.name).trim()) || '';
+    const blocksRaw = req.body && req.body.blocks;
+    if (!kunde || !name) {
+      res.status(400).send('Kunde und Kampagnenname sind Pflicht.');
+      return;
+    }
+    const blocks = parseBlocksText(typeof blocksRaw === 'string' ? blocksRaw : '');
+    const doc = {
+      client: kunde,
+      name,
+      blocks,
+      createdAt: new Date(),
+    };
+    const db = await getDb();
+    const r = await db.collection('campaigns').insertOne(doc);
+    res.redirect(303, `/c/${r.insertedId.toString()}`);
+  } catch (e) {
+    res.status(500).send(escapeHtml(String(e.message || e)));
+  }
+});
+
 app.get('/', async (req, res) => {
   try {
     const db = await getDb();
@@ -240,7 +285,7 @@ app.get('/', async (req, res) => {
       const id = r._id.toString();
       list += `<li><a href="/c/${id}">${escapeHtml(r.client)}: ${escapeHtml(r.name)}</a></li>`;
     }
-    const html = `<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Kampagnen</title><style>body{font-family:system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem;color:#111}a{color:#06c}button{font:inherit;cursor:pointer}</style></head><body><h1 style="font-size:1.35rem">Kampagnen</h1><p>API: <code>/api/campaigns</code>, Demo: <code>POST /api/seed-demo</code></p><form method="post" action="/seed-demo" style="margin-bottom:1rem"><button type="submit">Beispiel-Kampagne anlegen (BMW)</button></form><ul>${list || '<li>Noch keine Kampagne.</li>'}</ul></body></html>`;
+    const html = `<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Kampagnen</title><style>body{font-family:system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem;color:#111}a{color:#06c}button{font:inherit;cursor:pointer}</style></head><body><h1 style="font-size:1.35rem">Kampagnen</h1><p><a href="/neu">Neue Kampagne anlegen</a></p><p>API: <code>/api/campaigns</code>, Demo: <code>POST /api/seed-demo</code></p><form method="post" action="/seed-demo" style="margin-bottom:1rem"><button type="submit">Beispiel-Kampagne anlegen (BMW)</button></form><ul>${list || '<li>Noch keine Kampagne.</li>'}</ul></body></html>`;
     res.type('html').send(html);
   } catch (e) {
     res.status(500).send(escapeHtml(String(e.message || e)));
